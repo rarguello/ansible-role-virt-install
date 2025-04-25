@@ -1,0 +1,108 @@
+---
+# defaults file for ansible-role-virt-install
+
+# KVM Host settings
+rhel_subscription_org: "" # Required for RHEL registration if not already registered
+rhel_subscription_activation_key: "" # Required for RHEL registration if not already registered
+rhel_subscription_pool_id: "" # Optional: Pool ID to attach if activation key doesn't handle it
+
+# Default VM creation method ('qcow2' or 'kickstart')
+vm_creation_method: "qcow2"
+
+# Common VM parameters
+vm_name: "default-vm"
+vm_memory_mb: 2048 # Memory in MiB
+vm_vcpus: 2
+vm_os_variant: "rhel9-unknown" # Use 'osinfo-query os' on the KVM host to list options
+vm_network: "default" # Libvirt network name
+vm_autostart: true # Autostart VM with libvirtd
+
+# VM State Management
+vm_state: "running" # Desired state: running | shutdown | destroyed | undefined (same as destroyed)
+
+# Network Configuration (Applied via Kickstart or Cloud-init)
+vm_network_config_method: "dhcp" # dhcp or static
+vm_network_device: "eth0" # Network device name inside the VM (used for static config)
+vm_network_ip: "" # e.g., 192.168.122.50/24 (Required for static)
+vm_network_gateway: "" # e.g., 192.168.122.1 (Required for static)
+vm_network_dns_servers: [] # e.g., ['192.168.122.1', '8.8.8.8'] (Optional for static)
+vm_network_dns_search: [] # e.g., ['example.com'] (Optional for static)
+
+# Common Disk Configuration
+vm_disk_path: "/var/lib/libvirt/images" # Directory to store VM disks on KVM host
+vm_image_download_dir: "{{ vm_disk_path }}/downloaded" # Directory to store downloaded base images/ISOs
+
+# Primary Disk (Defined by method-specific vars below)
+vm_disk_size_gb: 20 # Final disk size for the primary VM disk
+
+# Additional Disks (Optional)
+# List of dictionaries. Example:
+# vm_disks:
+#   - size_gb: 50
+#     name: data_disk_1 # Used for the filename, e.g., vm_name-data_disk_1.qcow2
+#     format: qcow2     # Optional, defaults to qcow2
+#     bus: virtio       # Optional, defaults to virtio (valid: virtio, sata, scsi, usb, ide)
+#   - size_gb: 10
+#     name: scratch_disk
+vm_disks: []
+
+# Parameters for qcow2 based creation
+# Can be an absolute path on the KVM host OR a key from the `image_urls` dict in vars/main.yml (e.g., 'rocky-9-qcow2')
+vm_qcow2_base_image_path: ""
+# cloud-init parameters (passed as dictionaries/YAML)
+# If vm_cloud_init_network_config is empty and vm_network_config_method is 'static',
+# a basic network config will be generated based on vm_network_* variables.
+vm_cloud_init_user_data: {} # Dictionary/YAML for user-data (e.g., users, packages, runcmd)
+vm_cloud_init_meta_data: {} # Dictionary/YAML for meta-data (e.g., instance-id, hostname)
+vm_cloud_init_network_config: {} # Dictionary/YAML for network-config v1 or v2
+
+# Parameters for kickstart based creation
+# Can be an absolute path on the KVM host, a URL, OR a key from the `image_urls` dict in vars/main.yml (e.g., 'rocky-9-iso')
+vm_iso_path: ""
+vm_kickstart_template: "kickstart.ks.j2" # Template file within the role's templates directory
+# Variables to pass into the kickstart template (examples below)
+vm_kickstart_vars:
+  hostname: "{{ vm_name }}"
+  root_password_hash: "$6$yourhashedpasswordhere$..." # Generate with: python -c 'import crypt; print(crypt.crypt("YourPassword", crypt.mksalt(crypt.METHOD_SHA512)))'
+  timezone: "UTC"
+  locale: "en_US.UTF-8"
+  keyboard: "us"
+  # Default partitioning scheme (used if partitions list below is empty)
+  default_boot_partition_size_mb: 512
+  default_swap_partition_size_mb: 1024
+  default_root_partition_size_mb: 1 # 1 means minimum size, it will grow automatically
+  # Custom partitioning scheme (overrides defaults if not empty)
+  # List of dictionaries. Required keys: mount (or 'swap'), size_mb.
+  # Optional keys: fstype (defaults to xfs), grow (boolean, defaults to false), options (string).
+  # Example:
+  # partitions:
+  #   - mount: /boot
+  #     size_mb: 512
+  #     fstype: xfs
+  #   - mount: swap
+  #     size_mb: 2048
+  #     fstype: swap
+  #   - mount: /
+  #     size_mb: 10240 # Minimum size if grow is true
+  #     fstype: xfs
+  #     grow: true
+  partitions: []
+  # User creation example
+  users:
+    - name: admin
+      groups: wheel
+      password_hash: "$6$anotherhashedpassword$..."
+  # Package installation
+  packages:
+    - "@core"
+    - "openssh-server"
+    - "vim-minimal"
+    - "cloud-init"
+    - "qemu-guest-agent"
+  # RHEL Subscription details for kickstart (if needed during %post)
+  ks_rhel_subscription_org: "{{ rhel_subscription_org }}"
+  ks_rhel_subscription_activation_key: "{{ rhel_subscription_activation_key }}"
+  ks_rhel_subscription_pool_id: "{{ rhel_subscription_pool_id }}"
+
+# virt-install extra arguments (for advanced customization)
+virt_install_extra_args: "" # e.g., "--cpu host-passthrough --features smm.state=on"

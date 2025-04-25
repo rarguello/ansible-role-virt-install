@@ -1,0 +1,71 @@
+---
+# tasks file for ansible-role-virt-install
+
+- name: Ensure KVM and virtualization tools are installed
+  ansible.builtin.package:
+    name:
+      - qemu-kvm
+      - libvirt-daemon-kvm
+      - libvirt-client
+      - virt-install
+      - virt-viewer
+      - genisoimage # Needed for cloud-init ISO generation
+      - libosinfo-bin # Provides osinfo-query, useful for os-variant
+      - libguestfs-tools-c # Provides virt-sysprep, virt-customize (optional but useful)
+    state: present
+  become: true
+  tags:
+    - kvm_host_setup
+    - packages
+
+- name: Ensure libvirtd service is enabled and running
+  ansible.builtin.service:
+    name: libvirtd
+    state: started
+    enabled: true
+  become: true
+  tags:
+    - kvm_host_setup
+    - service
+
+# RHEL Subscription Handling (Conditional)
+- name: Check if system is already registered (RHEL only)
+  ansible.builtin.command: subscription-manager status
+  register: subscription_status
+  changed_when: false
+  failed_when: false # Don't fail if command doesn't exist
+  when: ansible_distribution == 'RedHat'
+  become: true
+  tags:
+    - kvm_host_setup
+    - rhel_subscription
+
+- name: Register RHEL system if not registered
+  ansible.builtin.command: "subscription-manager register --org={{ rhel_subscription_org }} --activationkey={{ rhel_subscription_activation_key }}"
+  when:
+    - ansible_distribution == 'RedHat'
+    - "'Overall Status: Current' not in subscription_status.stdout"
+    - rhel_subscription_org is defined
+    - rhel_subscription_activation_key is defined
+  become: true
+  # Consider adding no_log: true for sensitive keys
+  tags:
+    - kvm_host_setup
+    - rhel_subscription
+
+- name: Attach RHEL subscription pool if not attached
+  ansible.builtin.command: "subscription-manager attach --pool={{ rhel_subscription_pool_id }}"
+  when:
+    - ansible_distribution == 'RedHat'
+    - "'Overall Status: Current' not in subscription_status.stdout" # Re-check or rely on previous step success
+    - rhel_subscription_pool_id is defined # Optional, might be covered by activation key
+  become: true
+  tags:
+    - kvm_host_setup
+    - rhel_subscription
+
+# Include VM creation tasks
+- name: Include VM creation tasks
+  ansible.builtin.include_tasks: create_vm.yml
+  tags:
+    - create_vm

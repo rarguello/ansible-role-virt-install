@@ -1,0 +1,110 @@
+---
+# tasks file to prepare (download if necessary) the OS image
+
+- name: Set image source based on input type (qcow2 or iso)
+  ansible.builtin.set_fact:
+    image_source_key_or_path: "{{ (vm_creation_method == 'qcow2') | ternary(vm_qcow2_base_image_path, vm_iso_path) }}"
+    image_type: "{{ (vm_creation_method == 'qcow2') | ternary('qcow2', 'iso') }}"
+
+- name: Fail if image source is not defined
+  ansible.builtin.fail:
+    msg: "Variable '{{ (vm_creation_method == 'qcow2') | ternary('vm_qcow2_base_image_path', 'vm_iso_path') }}' must be defined."
+  when: image_source_key_or_path is not defined or image_source_key_or_path | length == 0
+
+- name: Check if image source is a key in image_urls
+  ansible.builtin.set_fact:
+    is_image_key: "{{ image_source_key_or_path in image_urls }}"
+
+# --- Handling image defined by key --- #
+- name: Block for handling image defined by key
+  when: is_image_key
+  block:
+    - name: Get image details from image_urls
+      ansible.builtin.set_fact:
+        image_url: "{{ image_urls[image_source_key_or_path].url }}"
+        image_checksum: "{{ image_urls[image_source_key_or_path].checksum | default(omit) }}"
+        image_filename: "{{ image_urls[image_source_key_or_path].url | urlsplit('path') | basename }}"
+
+    - name: Define downloaded image destination path
+      ansible.builtin.set_fact:
+        downloaded_image_path: "{{ vm_image_download_dir }}/{{ image_filename }}"
+
+    - name: Ensure download directory exists
+      ansible.builtin.file:
+        path: "{{ vm_image_download_dir }}"
+        state: directory
+        mode: '0755'
+      become: true
+
+    - name: Download image if not present or checksum mismatch
+      ansible.builtin.get_url:
+        url: "{{ image_url }}"
+        dest: "{{ downloaded_image_path }}"
+        checksum: "{{ image_checksum | default(omit) }}" # May need manual checksum if URL points to a checksum file
+        mode: '0644'
+      become: true # May need sudo to write to download dir
+      register: download_result
+
+    - name: Set effective image path to downloaded file
+      ansible.builtin.set_fact:
+        effective_image_path: "{{ downloaded_image_path }}"
+
+# --- Handling image defined by direct path or URL --- #
+- name: Block for handling image defined by direct path/URL
+  when: not is_image_key
+  block:
+    - name: Check if direct source is a URL
+      ansible.builtin.set_fact:
+        source_is_url: "{{ image_source_key_or_path.startswith('http://') or image_source_key_or_path.startswith('https://') }}"
+
+    - name: Handle direct URL source
+      when: source_is_url
+      block:
+        - name: Define downloaded image destination path (from URL)
+          ansible.builtin.set_fact:
+            direct_url_filename: "{{ image_source_key_or_path | urlsplit('path') | basename }}"
+            downloaded_direct_url_path: "{{ vm_image_download_dir }}/{{ image_source_key_or_path | urlsplit('path') | basename }}"
+
+        - name: Ensure download directory exists
+          ansible.builtin.file:
+            path: "{{ vm_image_download_dir }}"
+            state: directory
+            mode: '0755'
+          become: true
+
+        - name: Download image from direct URL if not present
+          ansible.builtin.get_url:
+            url: "{{ image_source_key_or_path }}"
+            dest: "{{ downloaded_direct_url_path }}"
+            mode: '0644'
+            force: false # Don't redownload if it exists
+          become: true
+          register: download_direct_result
+
+        - name: Set effective image path to downloaded file (from URL)
+          ansible.builtin.set_fact:
+            effective_image_path: "{{ downloaded_direct_url_path }}"
+
+    - name: Handle direct local path source
+      when: not source_is_url
+      block:
+        - name: Check if local image file exists
+          ansible.builtin.stat:
+            path: "{{ image_source_key_or_path }}"
+          register: local_image_stat
+          become: true # May need sudo if path requires it
+
+        - name: Fail if local image file does not exist
+          ansible.builtin.fail:
+            msg: "Local image file {{ image_source_key_or_path }} not found on the KVM host."
+          when: not local_image_stat.stat.exists
+
+        - name: Set effective image path to local file
+          ansible.builtin.set_fact:
+            effective_image_path: "{{ image_source_key_or_path }}"
+
+# --- Final Check --- #
+- name: Fail if effective_image_path is not set (should not happen)
+  ansible.builtin.fail:
+    msg: "Internal error: Could not determine the effective image path."
+  when: effective_image_path is not defined or effective_image_path | length == 0

@@ -1,0 +1,121 @@
+---
+# tasks file for creating the virtual machine
+
+- name: Check if VM {{ vm_name }} already exists
+  ansible.builtin.command: "virsh dominfo {{ vm_name }}"
+  register: vm_info
+  changed_when: false
+  failed_when: false # Don't fail if domain doesn't exist
+  become: true
+
+- name: Fail if VM name is not defined
+  ansible.builtin.fail:
+    msg: "Variable 'vm_name' must be defined."
+  when: vm_name is not defined or vm_name | length == 0
+
+# --- VM Creation Block --- #
+- name: Block for VM Creation
+  when: vm_info.rc != 0 and vm_state not in ['destroyed', 'undefined']
+  block:
+    # Prepare the image (download if necessary)
+    - name: Include image preparation tasks
+      ansible.builtin.include_tasks: prepare_image.yml
+
+    # Create additional disk images
+    - name: Create additional disk images
+      ansible.builtin.command:
+        cmd: "qemu-img create -f {{ item.format | default('qcow2') }} {{ vm_disk_path }}/{{ vm_name }}-{{ item.name }}.{{ item.format | default('qcow2') }} {{ item.size_gb }}G"
+      loop: "{{ vm_disks }}"
+      become: true
+      when: vm_disks is defined and vm_disks | length > 0
+      # Consider adding checks if disk file already exists
+
+    - name: Include QCOW2 creation tasks
+      ansible.builtin.include_tasks: create_vm_qcow2.yml
+      when: vm_creation_method == 'qcow2'
+
+    - name: Include Kickstart creation tasks
+      ansible.builtin.include_tasks: create_vm_kickstart.yml
+      when: vm_creation_method == 'kickstart'
+
+    - name: Set VM {{ vm_name }} to autostart if specified
+      ansible.builtin.command: "virsh autostart {{ vm_name }}"
+      when: vm_autostart | bool
+      become: true
+
+    - name: Set VM {{ vm_name }} to not autostart if specified
+      ansible.builtin.command: "virsh autostart --disable {{ vm_name }}"
+      when: not vm_autostart | bool
+      become: true
+
+    # Refresh VM info after creation
+    - name: Refresh VM info after creation
+      ansible.builtin.command: "virsh dominfo {{ vm_name }}"
+      register: vm_info
+      changed_when: false
+      failed_when: false
+      become: true
+
+# --- VM State Management Block --- #
+- name: Block for VM State Management
+  when: vm_info.rc == 0 # Only manage state if VM exists
+  block:
+    - name: Get current VM state
+      ansible.builtin.command: "virsh domstate {{ vm_name }}"
+      register: current_vm_state_cmd
+      changed_when: false
+      become: true
+
+    - name: Set current_vm_state fact
+      ansible.builtin.set_fact:
+        current_vm_state: "{{ current_vm_state_cmd.stdout | trim }}"
+
+    # Handle 'running' state
+    - name: Start VM {{ vm_name }} if not running
+      ansible.builtin.command: "virsh start {{ vm_name }}"
+      when:
+        - vm_state == 'running'
+        - current_vm_state != 'running'
+      become: true
+
+    # Handle 'shutdown' state
+    - name: Shutdown VM {{ vm_name }} if running
+      ansible.builtin.command: "virsh shutdown {{ vm_name }}"
+      when:
+        - vm_state == 'shutdown'
+        - current_vm_state == 'running'
+      become: true
+      # Add retries/delay or check state after shutdown?
+
+    # Handle 'destroyed' or 'undefined' state
+    - name: Destroy VM {{ vm_name }} if running (forced power off)
+      ansible.builtin.command: "virsh destroy {{ vm_name }}"
+      when:
+        - vm_state in ['destroyed', 'undefined']
+        - current_vm_state == 'running'
+      become: true
+
+    - name: Undefine VM {{ vm_name }} (removes config)
+      ansible.builtin.command: "virsh undefine {{ vm_name }}"
+      when: vm_state in ['destroyed', 'undefined']
+      become: true
+
+    - name: Gather paths of all VM disks
+      ansible.builtin.set_fact:
+        vm_disk_files_to_remove:
+          - "{{ vm_disk_path }}/{{ vm_name }}.qcow2"
+          - "{{ vm_disk_path }}/{{ vm_name }}-cidata.iso"
+
+    - name: Add additional disk paths to removal list
+      ansible.builtin.set_fact:
+        vm_disk_files_to_remove: "{{ vm_disk_files_to_remove + [vm_disk_path + '/' + vm_name + '-' + item.name + '.' + (item.format | default('qcow2'))] }}"
+      loop: "{{ vm_disks }}"
+      when: vm_disks is defined and vm_disks | length > 0
+
+    - name: Remove all VM disk images and cloud-init ISO
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ vm_disk_files_to_remove }}"
+      become: true
+      when: vm_state in ['destroyed', 'undefined']

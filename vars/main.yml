@@ -1,0 +1,45 @@
+---
+# vars file for ansible-role-virt-install
+
+# URLs and checksums for downloadable images
+# Checksums are SHA256
+# URLs should point to the latest stable if possible, or specific versions
+# Find official URLs:
+# Rocky: https://rockylinux.org/alternative-images/ -> Cloud Base Images / Minimal ISO
+# CentOS Stream: https://www.centos.org/centos-stream/ -> Cloud Images / Boot ISOs
+# NOTE: These URLs can change. Verify them periodically.
+image_urls:
+  # Rocky Linux 9
+  rocky-9-qcow2:
+    url: "https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-latest.x86_64.qcow2"
+    checksum: "sha256:https://dl.rockylinux.org/pub/rocky/9/images/x86_64/CHECKSUM"
+    # Note: Checksum URL provides a file with multiple checksums. get_url might need adjustment or manual checksum value.
+    # Example manual checksum (replace with actual!): checksum: "sha256:abcdef123..."
+  rocky-9-iso:
+    url: "https://download.rockylinux.org/pub/rocky/9/isos/x86_64/Rocky-9.4-x86_64-minimal.iso"
+    checksum: "sha256:https://download.rockylinux.org/pub/rocky/9/isos/x86_64/CHECKSUM"
+    # Example manual checksum (replace with actual!): checksum: "sha256:abcdef123..."
+
+  # Rocky Linux 8 (Example - URLs/Checksums need verification)
+  rocky-8-qcow2:
+    url: "https://dl.rockylinux.org/pub/rocky/8/images/x86_64/Rocky-8-GenericCloud-latest.x86_64.qcow2"
+    checksum: "sha256:https://dl.rockylinux.org/pub/rocky/8/images/x86_64/CHECKSUM"
+  rocky-8-iso:
+    url: "https://download.rockylinux.org/pub/rocky/8/isos/x86_64/Rocky-8.10-x86_64-minimal.iso"
+    checksum: "sha256:https://download.rockylinux.org/pub/rocky/8/isos/x86_64/CHECKSUM"
+
+  # CentOS Stream 9
+  centos-stream-9-qcow2:
+    url: "https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2"
+    checksum: "sha256:https://cloud.centos.org/centos/9-stream/x86_64/images/CHECKSUM.sha256"
+  centos-stream-9-iso:
+    url: "https://dl.rockylinux.org/vault/centos/9-stream/BaseOS/x86_64/iso/CentOS-Stream-9-latest-x86_64-boot.iso" # Boot ISO, requires network install
+    checksum: "sha256:https://dl.rockylinux.org/vault/centos/9-stream/BaseOS/x86_64/iso/CHECKSUM.sha256"
+
+  # CentOS Stream 10 (Example - URLs/Checksums need verification when available)
+  # centos-stream-10-qcow2:
+  #   url: "..."
+  #   checksum: "..."
+  # centos-stream-10-iso:
+  #   url: "..."
+  #   checksum: "..."

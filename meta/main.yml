@@ -1,0 +1,38 @@
+galaxy_info:
+  author: Your Name
+  description: Ansible role to create KVM virtual machines using virt-install (qcow2 or kickstart).
+  company: Your Company
+
+  # If the issue tracker for your role is not on github, uncomment the
+  # next line and provide a value
+  # issue_tracker_url: http://example.com/issue/tracker
+
+  # Choose a valid license ID from https://spdx.org/licenses/
+  license: MIT # Choose an appropriate license
+
+  min_ansible_version: "2.12" # Adjust based on modules used
+
+  # If this role is platform dependent, uncomment this section
+  # and replace with the platforms you support.
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+        # Add other RHEL-like versions supported (e.g., 8, Stream 9, Stream 10)
+
+  galaxy_tags:
+    - kvm
+    - libvirt
+    - virtinstall
+    - virtualization
+    - vm
+    - rhel
+    - rocky
+    - centos
+    - cloudinit
+    - kickstart
+
+dependencies: []
+  # List your role dependencies here, for example:
+  # - role: geerlingguy.java
+  #   version: 1.0.0

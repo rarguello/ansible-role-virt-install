@@ -1,0 +1,100 @@
+---
+# tasks to create VM using kickstart
+
+# Note: prepare_image.yml should have run before this and set the 'effective_image_path' fact
+
+- name: Fail if effective_image_path is not defined (internal error)
+  ansible.builtin.fail:
+    msg: "Internal error: effective_image_path was not set by prepare_image.yml"
+  when: effective_image_path is not defined or effective_image_path | length == 0
+
+- name: Fail if kickstart template is not defined
+  ansible.builtin.fail:
+    msg: "Variable 'vm_kickstart_template' must be defined when using vm_creation_method 'kickstart'."
+  when: vm_kickstart_template is not defined or vm_kickstart_template | length == 0
+
+- name: Ensure VM disk directory exists
+  ansible.builtin.file:
+    path: "{{ vm_disk_path }}"
+    state: directory
+    owner: qemu
+    group: qemu
+    mode: '0775'
+  become: true
+
+- name: Define target VM disk path
+  ansible.builtin.set_fact:
+    vm_target_disk_path: "{{ vm_disk_path }}/{{ vm_name }}.qcow2"
+
+- name: Generate Kickstart file from template
+  ansible.builtin.template:
+    src: "{{ vm_kickstart_template }}"
+    dest: "/tmp/{{ vm_name }}.ks"
+    mode: '0644'
+  become: false # Template generation happens on control node
+  delegate_to: localhost # Ensure template is rendered locally first
+
+- name: Copy generated Kickstart file to KVM host
+  ansible.builtin.copy:
+    src: "/tmp/{{ vm_name }}.ks"
+    dest: "/tmp/{{ vm_name }}.ks"
+    mode: '0644'
+  become: true
+
+# Construct virt-install command
+- name: Construct base virt-install command for kickstart
+  ansible.builtin.set_fact:
+    virt_install_cmd: >
+      virt-install --name {{ vm_name }}
+      --memory {{ vm_memory_mb }}
+      --vcpus {{ vm_vcpus }}
+      --disk path={{ vm_target_disk_path }},size={{ vm_disk_size_gb }},format=qcow2,bus=virtio
+      {% for disk in vm_disks %}
+      --disk path={{ vm_disk_path }}/{{ vm_name }}-{{ disk.name }}.{{ disk.format | default('qcow2') }},format={{ disk.format | default('qcow2') }},bus={{ disk.bus | default('virtio') }}
+      {% endfor %}
+      --network network={{ vm_network }},model=virtio
+      --location {{ effective_image_path }} # Use the path determined by prepare_image.yml
+      --os-variant {{ vm_os_variant }}
+      --graphics vnc,listen=0.0.0.0 --noautoconsole
+      --initrd-inject /tmp/{{ vm_name }}.ks
+      --extra-args "inst.ks=file:/{{ vm_name }}.ks console=ttyS0,115200n8{{ (image_urls[image_source_key_or_path].url is defined and image_urls[image_source_key_or_path].url | urlsplit('scheme') in ['http', 'https']) | ternary(' inst.repo=' + image_urls[image_source_key_or_path].url | replace(image_urls[image_source_key_or_path].url | urlsplit('path') | basename, '') , '') }}" # Add inst.repo if using boot ISO from URL
+      {{ virt_install_extra_args | default('') }}
+  when: is_image_key is defined # Ensure facts from prepare_image are available
+
+- name: Construct base virt-install command for kickstart (direct path/URL)
+  ansible.builtin.set_fact:
+    virt_install_cmd: >
+      virt-install --name {{ vm_name }}
+      --memory {{ vm_memory_mb }}
+      --vcpus {{ vm_vcpus }}
+      --disk path={{ vm_target_disk_path }},size={{ vm_disk_size_gb }},format=qcow2,bus=virtio
+      {% for disk in vm_disks %}
+      --disk path={{ vm_disk_path }}/{{ vm_name }}-{{ disk.name }}.{{ disk.format | default('qcow2') }},format={{ disk.format | default('qcow2') }},bus={{ disk.bus | default('virtio') }}
+      {% endfor %}
+      --network network={{ vm_network }},model=virtio
+      --location {{ effective_image_path }} # Use the path determined by prepare_image.yml
+      --os-variant {{ vm_os_variant }}
+      --graphics vnc,listen=0.0.0.0 --noautoconsole
+      --initrd-inject /tmp/{{ vm_name }}.ks
+      --extra-args "inst.ks=file:/{{ vm_name }}.ks console=ttyS0,115200n8{{ (source_is_url | default(false)) | ternary(' inst.repo=' + image_source_key_or_path | replace(image_source_key_or_path | urlsplit('path') | basename, '') , '') }}" # Add inst.repo if using boot ISO from URL
+      {{ virt_install_extra_args | default('') }}
+  when: is_image_key is not defined or not is_image_key
+
+- name: Create VM {{ vm_name }} using virt-install (kickstart)
+  ansible.builtin.command:
+    cmd: "{{ virt_install_cmd }}"
+  become: true
+  changed_when: true # virt-install creating a VM is always a change
+
+- name: Clean up Kickstart file from KVM host
+  ansible.builtin.file:
+    path: "/tmp/{{ vm_name }}.ks"
+    state: absent
+  become: true
+
+- name: Clean up Kickstart file from control node
+  ansible.builtin.file:
+    path: "/tmp/{{ vm_name }}.ks"
+    state: absent
+  become: false
+  delegate_to: localhost

@@ -1,0 +1,137 @@
+---
+# tasks to create VM from qcow2 image
+
+# Note: prepare_image.yml should have run before this and set the 'effective_image_path' fact
+
+- name: Fail if effective_image_path is not defined (internal error)
+  ansible.builtin.fail:
+    msg: "Internal error: effective_image_path was not set by prepare_image.yml"
+  when: effective_image_path is not defined or effective_image_path | length == 0
+
+- name: Ensure VM disk directory exists
+  ansible.builtin.file:
+    path: "{{ vm_disk_path }}"
+    state: directory
+    owner: qemu
+    group: qemu
+    mode: '0775'
+  become: true
+
+- name: Define target VM disk path
+  ansible.builtin.set_fact:
+    vm_target_disk_path: "{{ vm_disk_path }}/{{ vm_name }}.qcow2"
+
+- name: Copy base qcow2 image (from effective path) to VM disk path
+  ansible.builtin.copy:
+    src: "{{ effective_image_path }}" # Use the path determined by prepare_image.yml
+    dest: "{{ vm_target_disk_path }}"
+    remote_src: true
+    owner: qemu
+    group: qemu
+    mode: '0644' # Check permissions needed by libvirt/qemu
+  become: true
+
+- name: Resize VM disk image
+  ansible.builtin.command:
+    cmd: "qemu-img resize {{ vm_target_disk_path }} {{ vm_disk_size_gb }}G"
+  become: true
+  when: vm_disk_size_gb is defined and vm_disk_size_gb > 0
+
+# Cloud-init ISO generation
+- name: Define cloud_init_network_config_data variable
+  ansible.builtin.set_fact:
+    cloud_init_network_config_data: "{{ vm_cloud_init_network_config }}"
+
+- name: Generate static network config for cloud-init if requested and not provided
+  ansible.builtin.set_fact:
+    cloud_init_network_config_data:
+      version: 1
+      config:
+        - type: physical
+          name: "{{ vm_network_device }}"
+          subnets:
+            - type: static
+              address: "{{ vm_network_ip }}"
+              gateway: "{{ vm_network_gateway }}"
+              dns_nameservers: "{{ vm_network_dns_servers }}"
+              dns_search: "{{ vm_network_dns_search }}"
+  when:
+    - vm_network_config_method == 'static'
+    - not vm_cloud_init_network_config # Only generate if user didn't provide a full config
+    - vm_network_ip is defined and vm_network_ip | length > 0
+    - vm_network_gateway is defined and vm_network_gateway | length > 0
+
+- name: Set cloud_init_iso_path fact to empty string initially
+  ansible.builtin.set_fact:
+    cloud_init_iso_path: ""
+
+- name: Create temporary directory for cloud-init files
+  ansible.builtin.tempfile:
+    state: directory
+    suffix: cloud_init
+  register: cloud_init_temp_dir
+  when: vm_cloud_init_user_data or vm_cloud_init_meta_data or cloud_init_network_config_data
+
+- name: Create user-data file from dictionary/YAML
+  ansible.builtin.copy:
+    content: "#cloud-config\n{{ vm_cloud_init_user_data | to_nice_yaml }}"
+    dest: "{{ cloud_init_temp_dir.path }}/user-data"
+  when: vm_cloud_init_user_data
+
+- name: Create meta-data file from dictionary/YAML
+  ansible.builtin.copy:
+    content: "{{ vm_cloud_init_meta_data | to_nice_yaml }}"
+    dest: "{{ cloud_init_temp_dir.path }}/meta-data"
+  when: vm_cloud_init_meta_data
+
+- name: Create network-config file from dictionary/YAML
+  ansible.builtin.copy:
+    content: "{{ cloud_init_network_config_data | to_nice_yaml }}"
+    dest: "{{ cloud_init_temp_dir.path }}/network-config"
+  when: cloud_init_network_config_data
+
+- name: Generate cloud-init ISO
+  ansible.builtin.command:
+    cmd: >
+      genisoimage -output {{ vm_disk_path }}/{{ vm_name }}-cidata.iso
+      -volid cidata -joliet -rock
+      {{ (vm_cloud_init_user_data | length > 0) | ternary(cloud_init_temp_dir.path + '/user-data', '') }}
+      {{ (vm_cloud_init_meta_data | length > 0) | ternary(cloud_init_temp_dir.path + '/meta-data', '') }}
+      {{ (cloud_init_network_config_data | length > 0) | ternary(cloud_init_temp_dir.path + '/network-config', '') }}
+  become: true
+  when: cloud_init_temp_dir.path is defined
+
+- name: Set cloud_init_iso_path fact
+  ansible.builtin.set_fact:
+    cloud_init_iso_path: "{{ vm_disk_path }}/{{ vm_name }}-cidata.iso"
+  when: cloud_init_temp_dir.path is defined
+
+- name: Clean up temporary cloud-init directory
+  ansible.builtin.file:
+    path: "{{ cloud_init_temp_dir.path }}"
+    state: absent
+  when: cloud_init_temp_dir.path is defined
+
+# Construct virt-install command
+- name: Construct base virt-install command for qcow2
+  ansible.builtin.set_fact:
+    virt_install_cmd: >
+      virt-install --name {{ vm_name }}
+      --memory {{ vm_memory_mb }}
+      --vcpus {{ vm_vcpus }}
+      --disk path={{ vm_target_disk_path }},format=qcow2,bus=virtio
+      {% for disk in vm_disks %}
+      --disk path={{ vm_disk_path }}/{{ vm_name }}-{{ disk.name }}.{{ disk.format | default('qcow2') }},format={{ disk.format | default('qcow2') }},bus={{ disk.bus | default('virtio') }}
+      {% endfor %}
+      --network network={{ vm_network }},model=virtio
+      --os-variant {{ vm_os_variant }}
+      --graphics vnc,listen=0.0.0.0 --noautoconsole
+      --import
+      {{ (cloud_init_iso_path | length > 0) | ternary('--disk path=' + cloud_init_iso_path + ',device=cdrom', '') }}
+      {{ virt_install_extra_args | default('') }}
+
+- name: Create VM {{ vm_name }} using virt-install (qcow2)
+  ansible.builtin.command:
+    cmd: "{{ virt_install_cmd }}"
+  become: true
+  changed_when: true # virt-install creating a VM is always a change
