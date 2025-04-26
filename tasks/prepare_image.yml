@@ -21,33 +21,72 @@
   block:
     - name: Get image details from image_urls
       ansible.builtin.set_fact:
-        image_url: "{{ image_urls[image_source_key_or_path].url }}"
-        image_checksum: "{{ image_urls[image_source_key_or_path].checksum | default(omit) }}"
-        image_filename: "{{ image_urls[image_source_key_or_path].url | urlsplit('path') | basename }}"
+        image_details: "{{ image_urls[image_source_key_or_path] }}"
 
-    - name: Define downloaded image destination path
+    - name: Set image details facts
       ansible.builtin.set_fact:
-        downloaded_image_path: "{{ vm_image_download_dir }}/{{ image_filename }}"
+        image_url: "{{ image_details.url | default(omit) }}"
+        image_checksum: "{{ image_details.checksum | default(omit) }}"
+        image_requires_download: "{{ image_details.image_requires_download | default(virt_install_image_requires_download) }}"
+        expected_local_filename: "{{ image_details.expected_local_filename | default(omit) }}"
 
-    - name: Ensure download directory exists
-      ansible.builtin.file:
-        path: "{{ vm_image_download_dir }}"
-        state: directory
-        mode: '0755'
-      become: true
+    - name: Handle downloadable image (by key)
+      when: image_requires_download
+      block:
+        - name: Define downloaded image filename
+          ansible.builtin.set_fact:
+            image_filename: "{{ image_url | urlsplit('path') | basename }}"
 
-    - name: Download image if not present or checksum mismatch
-      ansible.builtin.get_url:
-        url: "{{ image_url }}"
-        dest: "{{ downloaded_image_path }}"
-        checksum: "{{ image_checksum | default(omit) }}" # May need manual checksum if URL points to a checksum file
-        mode: '0644'
-      become: true # May need sudo to write to download dir
-      register: download_result
+        - name: Define downloaded image destination path
+          ansible.builtin.set_fact:
+            downloaded_image_path: "{{ vm_image_download_dir }}/{{ image_filename }}"
 
-    - name: Set effective image path to downloaded file
-      ansible.builtin.set_fact:
-        effective_image_path: "{{ downloaded_image_path }}"
+        - name: Ensure download directory exists
+          ansible.builtin.file:
+            path: "{{ vm_image_download_dir }}"
+            state: directory
+            mode: '0755'
+          become: true
+
+        - name: Download image if not present or checksum mismatch
+          ansible.builtin.get_url:
+            url: "{{ image_url }}"
+            dest: "{{ downloaded_image_path }}"
+            checksum: "{{ image_checksum | default(omit) }}" # May need manual checksum if URL points to a checksum file
+            mode: '0644'
+          become: true # May need sudo to write to download dir
+          register: download_result
+
+        - name: Set effective image path to downloaded file
+          ansible.builtin.set_fact:
+            effective_image_path: "{{ downloaded_image_path }}"
+
+    - name: Handle locally provided image (by key)
+      when: not image_requires_download
+      block:
+        - name: Fail if expected_local_filename is not defined for non-downloadable image key
+          ansible.builtin.fail:
+            msg: "Image key '{{ image_source_key_or_path }}' is marked as non-downloadable, but 'expected_local_filename' is not defined in image_urls."
+          when: expected_local_filename is not defined or expected_local_filename | length == 0
+
+        - name: Define expected local image path
+          ansible.builtin.set_fact:
+            expected_local_path: "{{ vm_disk_path }}/{{ expected_local_filename }}"
+
+        - name: Check if expected local image file exists
+          ansible.builtin.stat:
+            path: "{{ expected_local_path }}"
+          register: local_image_stat
+          become: true # May need sudo if path requires it
+
+        - name: Fail if expected local image file does not exist
+          ansible.builtin.fail:
+            msg: "Image key '{{ image_source_key_or_path }}' requires the image file '{{ expected_local_filename }}' to exist at '{{ expected_local_path }}'. Please download it from the source mentioned in vars/main.yml and place it there."
+          when: not local_image_stat.stat.exists
+
+        - name: Set effective image path to expected local file
+          ansible.builtin.set_fact:
+            effective_image_path: "{{ expected_local_path }}"
 
 # --- Handling image defined by direct path or URL --- #
 - name: Block for handling image defined by direct path/URL
@@ -63,7 +102,7 @@
         - name: Define downloaded image destination path (from URL)
           ansible.builtin.set_fact:
             direct_url_filename: "{{ image_source_key_or_path | urlsplit('path') | basename }}"
-            downloaded_direct_url_path: "{{ vm_image_download_dir }}/{{ image_source_key_or_path | urlsplit('path') | basename }}"
+            downloaded_direct_url_path: "{{ vm_image_download_dir }}/{{ direct_url_filename }}"
 
         - name: Ensure download directory exists
           ansible.builtin.file:

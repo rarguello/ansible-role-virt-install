@@ -13,33 +13,53 @@ image_urls:
   rocky-9-qcow2:
     url: "https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-latest.x86_64.qcow2"
     checksum: "sha256:https://dl.rockylinux.org/pub/rocky/9/images/x86_64/CHECKSUM"
+    image_requires_download: true
     # Note: Checksum URL provides a file with multiple checksums. get_url might need adjustment or manual checksum value.
     # Example manual checksum (replace with actual!): checksum: "sha256:abcdef123..."
   rocky-9-iso:
     url: "https://download.rockylinux.org/pub/rocky/9/isos/x86_64/Rocky-9.4-x86_64-minimal.iso"
     checksum: "sha256:https://download.rockylinux.org/pub/rocky/9/isos/x86_64/CHECKSUM"
+    image_requires_download: true
     # Example manual checksum (replace with actual!): checksum: "sha256:abcdef123..."
 
   # Rocky Linux 8 (Example - URLs/Checksums need verification)
   rocky-8-qcow2:
     url: "https://dl.rockylinux.org/pub/rocky/8/images/x86_64/Rocky-8-GenericCloud-latest.x86_64.qcow2"
     checksum: "sha256:https://dl.rockylinux.org/pub/rocky/8/images/x86_64/CHECKSUM"
+    image_requires_download: true
   rocky-8-iso:
     url: "https://download.rockylinux.org/pub/rocky/8/isos/x86_64/Rocky-8.10-x86_64-minimal.iso"
     checksum: "sha256:https://download.rockylinux.org/pub/rocky/8/isos/x86_64/CHECKSUM"
+    image_requires_download: true
 
   # CentOS Stream 9
   centos-stream-9-qcow2:
     url: "https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2"
     checksum: "sha256:https://cloud.centos.org/centos/9-stream/x86_64/images/CHECKSUM.sha256"
+    image_requires_download: true
   centos-stream-9-iso:
     url: "https://dl.rockylinux.org/vault/centos/9-stream/BaseOS/x86_64/iso/CentOS-Stream-9-latest-x86_64-boot.iso" # Boot ISO, requires network install
     checksum: "sha256:https://dl.rockylinux.org/vault/centos/9-stream/BaseOS/x86_64/iso/CHECKSUM.sha256"
+    image_requires_download: true
 
   # CentOS Stream 10 (Example - URLs/Checksums need verification when available)
   # centos-stream-10-qcow2:
   #   url: "..."
   #   checksum: "..."
+  #   image_requires_download: true
   # centos-stream-10-iso:
   #   url: "..."
   #   checksum: "..."
+  #   image_requires_download: true
+
+  # Red Hat Enterprise Linux 9 (Requires Subscription)
+  rhel-9-qcow2:
+    url: "Obtain from Red Hat Customer Portal (access.redhat.com) or Satellite server."
+    checksum: "Calculate SHA256 checksum after downloading."
+    image_requires_download: false
+    expected_local_filename: "rhel-9-latest-x86_64.qcow2" # User must place the downloaded image with this name in vm_disk_path
+  rhel-9-iso:
+    url: "Obtain from Red Hat Customer Portal (access.redhat.com) or Satellite server."
+    checksum: "Calculate SHA256 checksum after downloading."
+    image_requires_download: false
+    expected_local_filename: "rhel-9-latest-x86_64.iso" # User must place the downloaded image with this name in vm_disk_path

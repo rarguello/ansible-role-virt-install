@@ -147,3 +147,38 @@ vm_kickstart_vars:
 
 # virt-install extra arguments (for advanced customization)
 virt_install_extra_args: "" # e.g., "--cpu host-passthrough --features smm.state=on"
+
+# Default VM configuration
+virt_install_vm_name: "my-vm"
+virt_install_vm_os_variant: "rocky9.4" # Example, find variants with 'osinfo-query os'
+virt_install_vm_memory: 2048 # MB
+virt_install_vm_vcpu: 2
+virt_install_vm_disk_size: 20 # GB
+virt_install_vm_disk_path: "/var/lib/libvirt/images" # Default libvirt storage pool path
+virt_install_vm_image_type: "qcow2" # or "iso"
+virt_install_vm_image_name: "rocky-9-qcow2" # Key from vars/main.yml image_urls
+virt_install_vm_network_name: "default" # Libvirt network name
+virt_install_vm_network_type: "network" # 'network' or 'bridge'
+virt_install_vm_bridge_name: "br0" # Only used if network_type is 'bridge'
+virt_install_vm_ip_config: "dhcp" # 'dhcp' or 'static'
+virt_install_vm_static_ip: "192.168.122.100/24" # Only used if ip_config is 'static'
+virt_install_vm_gateway: "192.168.122.1" # Only used if ip_config is 'static'
+virt_install_vm_dns_servers: ["192.168.122.1", "8.8.8.8"] # Only used if ip_config is 'static'
+virt_install_vm_autostart: true
+virt_install_vm_wait_for_ip: true # Wait for the VM to get an IP after starting
+virt_install_vm_wait_timeout: 300 # Seconds to wait for IP
+
+# Image preparation defaults
+virt_install_image_download_path: "/tmp/virt_images" # Temporary download location
+virt_install_image_requires_download: true # Default to attempting download
+
+# Kickstart defaults (if using ISO install)
+virt_install_kickstart_template: "kickstart.ks.j2"
+virt_install_kickstart_root_password: "password" # Change this!
+virt_install_kickstart_user: "ansible"
+virt_install_kickstart_user_password: "password" # Change this!
+virt_install_kickstart_ssh_key: "~/.ssh/id_rsa.pub" # Path to public SSH key to inject
+
+# DNS Management (optional, requires python3-libvirt & permissions)
+virt_install_manage_dns: false
+virt_install_dns_host_aliases: [] # List of aliases for the primary hostname
