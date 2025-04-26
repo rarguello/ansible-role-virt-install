@@ -26,18 +26,32 @@
   ansible.builtin.set_fact:
     vm_target_disk_path: "{{ vm_disk_path }}/{{ vm_name }}.qcow2"
 
+- name: Create temporary file for kickstart
+  ansible.builtin.tempfile:
+    state: file
+    suffix: .ks
+  register: temp_kickstart_file
+  delegate_to: localhost # Create temp file on control node first
+
 - name: Generate Kickstart file from template
   ansible.builtin.template:
     src: "{{ vm_kickstart_template }}"
-    dest: "/tmp/{{ vm_name }}.ks"
+    dest: "{{ temp_kickstart_file.path }}"
     mode: '0644'
   become: false # Template generation happens on control node
-  delegate_to: localhost # Ensure template is rendered locally first
+  delegate_to: localhost
+
+- name: Create temporary file for kickstart on host
+  ansible.builtin.tempfile:
+    state: file
+    suffix: .ks
+  register: host_temp_kickstart_file
+  become: true
 
 - name: Copy generated Kickstart file to KVM host
   ansible.builtin.copy:
-    src: "/tmp/{{ vm_name }}.ks"
-    dest: "/tmp/{{ vm_name }}.ks"
+    src: "{{ temp_kickstart_file.path }}"
+    dest: "{{ host_temp_kickstart_file.path }}"
     mode: '0644'
   become: true
 
@@ -56,8 +70,8 @@
       --location {{ effective_image_path }} # Use the path determined by prepare_image.yml
       --os-variant {{ vm_os_variant }}
       --graphics vnc,listen=0.0.0.0 --noautoconsole
-      --initrd-inject /tmp/{{ vm_name }}.ks
-      --extra-args "inst.ks=file:/{{ vm_name }}.ks console=ttyS0,115200n8{{ (image_urls[image_source_key_or_path].url is defined and image_urls[image_source_key_or_path].url | urlsplit('scheme') in ['http', 'https']) | ternary(' inst.repo=' + image_urls[image_source_key_or_path].url | replace(image_urls[image_source_key_or_path].url | urlsplit('path') | basename, '') , '') }}" # Add inst.repo if using boot ISO from URL
+      --initrd-inject {{ host_temp_kickstart_file.path }}
+      --extra-args "inst.ks=file:{{ host_temp_kickstart_file.path | basename }} console=ttyS0,115200n8{{ (image_urls[image_source_key_or_path].url is defined and image_urls[image_source_key_or_path].url | urlsplit('scheme') in ['http', 'https']) | ternary(' inst.repo=' + image_urls[image_source_key_or_path].url | replace(image_urls[image_source_key_or_path].url | urlsplit('path') | basename, '') , '') }}" # Add inst.repo if using boot ISO from URL
       {{ virt_install_extra_args | default('') }}
   when: is_image_key is defined # Ensure facts from prepare_image are available
 
@@ -75,8 +89,8 @@
       --location {{ effective_image_path }} # Use the path determined by prepare_image.yml
       --os-variant {{ vm_os_variant }}
       --graphics vnc,listen=0.0.0.0 --noautoconsole
-      --initrd-inject /tmp/{{ vm_name }}.ks
-      --extra-args "inst.ks=file:/{{ vm_name }}.ks console=ttyS0,115200n8{{ (source_is_url | default(false)) | ternary(' inst.repo=' + image_source_key_or_path | replace(image_source_key_or_path | urlsplit('path') | basename, '') , '') }}" # Add inst.repo if using boot ISO from URL
+      --initrd-inject {{ host_temp_kickstart_file.path }}
+      --extra-args "inst.ks=file:{{ host_temp_kickstart_file.path | basename }} console=ttyS0,115200n8{{ (source_is_url | default(false)) | ternary(' inst.repo=' + image_source_key_or_path | replace(image_source_key_or_path | urlsplit('path') | basename, '') , '') }}" # Add inst.repo if using boot ISO from URL
       {{ virt_install_extra_args | default('') }}
   when: is_image_key is not defined or not is_image_key
 
@@ -88,13 +102,15 @@
 
 - name: Clean up Kickstart file from KVM host
   ansible.builtin.file:
-    path: "/tmp/{{ vm_name }}.ks"
+    path: "{{ host_temp_kickstart_file.path }}"
     state: absent
   become: true
+  when: host_temp_kickstart_file.path is defined
 
 - name: Clean up Kickstart file from control node
   ansible.builtin.file:
-    path: "/tmp/{{ vm_name }}.ks"
+    path: "{{ temp_kickstart_file.path }}"
     state: absent
   become: false
   delegate_to: localhost
+  when: temp_kickstart_file.path is defined

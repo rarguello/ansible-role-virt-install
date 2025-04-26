@@ -27,10 +27,15 @@ See `defaults/main.yml` for a comprehensive list of variables and their default 
 *   `vm_memory_mb`: RAM for the VM in MiB.
 *   `vm_vcpus`: Number of virtual CPUs.
 *   `vm_os_variant`: OS variant hint for libvirt (e.g., `rhel9.0`, `rocky9.0`). Use `osinfo-query os` on the KVM host.
-*   `vm_network`: Libvirt network to connect the VM to (e.g., `default`).
-*   `vm_disk_path`: Directory on the KVM host to store VM disk images (Default: `/var/lib/libvirt/images`).
-*   `vm_disk_size_gb`: Target size for the VM disk in GiB.
+*   `vm_network`: Libvirt network to connect the VM to (e.g., `default`). This value is passed to the `virt-install --network` argument.
 *   `vm_autostart`: (`true` | `false`) - Whether the VM should start automatically with the host.
+
+**DNS Configuration:**
+
+*   `vm_dns_enable`: (`true` | `false`) - Whether to register the VM's hostname in libvirt's internal DNS. Default: `true`.
+*   `vm_dns_domain`: The domain suffix for VM hostnames (e.g., `virt.local`). Default: `virt.local`.
+*   `vm_dns_hostname`: The hostname to register (without domain). Default: `{{ vm_name }}`.
+*   `vm_dns_fqdn`: The fully qualified domain name. Default: `{{ vm_dns_hostname }}.{{ vm_dns_domain }}`.
 
 **VM State Management:**
 
@@ -117,6 +122,7 @@ You can run only the VM creation using `ansible-playbook playbook.yml --tags cre
     vm_vcpus: 2
     vm_os_variant: rocky9.0
     vm_disk_size_gb: 50
+    vm_network: my_custom_network # Specify the desired libvirt network here
 
     # QCOW2 specific settings
     vm_creation_method: qcow2
@@ -252,6 +258,67 @@ You can run only the VM creation using `ansible-playbook playbook.yml --tags cre
         vm_kickstart_vars: "{{ item.kickstart_vars | default({}) }}"
       loop: "{{ vms_to_manage }}"
       tags: [ create_vm ] # Tag covers creation and state management
+```
+
+**Example with DNS Configuration:**
+
+```yaml
+---
+- hosts: kvm_hosts
+  become: true
+  vars:
+    # DNS configuration at the host level
+    vm_dns_domain: "lab.example.com"  # Custom domain for all VMs
+
+    vms_to_create:
+      - name: db01
+        memory: 4096
+        vcpus: 2
+        os_variant: rocky9.0
+        base_image: rocky-9-qcow2
+        disk_size: 60
+        # Static IP for DNS registration
+        network_config_method: static
+        network_ip: "192.168.122.10/24"
+        network_gateway: "192.168.122.1"
+        # Custom hostname (otherwise defaults to name)
+        dns_hostname: "database01" # Will be registered as database01.lab.example.com
+
+      - name: app01
+        memory: 2048
+        vcpus: 2
+        os_variant: rocky9.0
+        base_image: rocky-9-qcow2
+        disk_size: 40
+        # Uses default DHCP - IP will be detected from VM lease
+        # Custom DNS settings per VM
+        dns_enable: true
+        dns_domain: "apps.example.com" # Override host-level domain
+        # Will be registered as app01.apps.example.com
+
+  tasks:
+    - name: Create VMs with DNS registration
+      ansible.builtin.include_role:
+        name: ansible-role-virt-install
+      vars:
+        vm_name: "{{ item.name }}"
+        vm_memory_mb: "{{ item.memory }}"
+        vm_vcpus: "{{ item.vcpus }}"
+        vm_os_variant: "{{ item.os_variant }}"
+        vm_disk_size_gb: "{{ item.disk_size }}"
+        vm_creation_method: "{{ item.creation_method | default('qcow2') }}"
+        vm_qcow2_base_image_path: "{{ item.base_image }}"
+
+        # Network configuration
+        vm_network_config_method: "{{ item.network_config_method | default('dhcp') }}"
+        vm_network_ip: "{{ item.network_ip | default('') }}"
+        vm_network_gateway: "{{ item.network_gateway | default('') }}"
+
+        # DNS configuration
+        vm_dns_enable: "{{ item.dns_enable | default(true) }}"
+        vm_dns_hostname: "{{ item.dns_hostname | default(item.name) }}"
+        vm_dns_domain: "{{ item.dns_domain | default(vm_dns_domain) }}"
+      loop: "{{ vms_to_create }}"
 ```
 
 # You might run host setup separately first:

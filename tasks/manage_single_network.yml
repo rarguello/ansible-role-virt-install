@@ -1,0 +1,76 @@
+---
+# tasks file for managing a single libvirt network
+
+- name: Set network name
+  ansible.builtin.set_fact:
+    network_name: "{{ network_config.name }}"
+    network_ensure: "{{ network_config.ensure | default('present') }}"
+
+- name: Check if network {{ network_name }} exists
+  ansible.builtin.command: "virsh net-info {{ network_name }}"
+  register: net_info
+  changed_when: false
+  failed_when: false # Don't fail if network doesn't exist
+  become: true
+
+- name: Process network {{ network_name }} - present
+  when:
+    - network_ensure == 'present'
+    - (net_info.rc != 0 or not network_config.create_if_not_exists | default(false))
+  block:
+    - name: Create temporary file for network XML
+      ansible.builtin.tempfile:
+        state: file
+        suffix: _network.xml
+      register: temp_network_xml
+
+    - name: Generate network XML for {{ network_name }}
+      ansible.builtin.template:
+        src: network.xml.j2
+        dest: "{{ temp_network_xml.path }}"
+        mode: '0644'
+
+    - name: Define network {{ network_name }}
+      ansible.builtin.command: "virsh net-define {{ temp_network_xml.path }}"
+      become: true
+      register: define_result
+      changed_when: define_result.rc == 0
+      failed_when: define_result.rc != 0
+
+    - name: Set network {{ network_name }} to autostart
+      ansible.builtin.command: "virsh net-autostart {{ network_name }}"
+      become: true
+      when: network_config.autostart | default(true)
+      register: autostart_result
+      changed_when: autostart_result.rc == 0
+      failed_when: autostart_result.rc != 0
+
+    - name: Start network {{ network_name }}
+      ansible.builtin.command: "virsh net-start {{ network_name }}"
+      become: true
+      register: start_result
+      changed_when: start_result.rc == 0
+      failed_when: start_result.rc != 0 and 'already active' not in start_result.stderr
+
+    - name: Clean up temporary network XML
+      ansible.builtin.file:
+        path: "{{ temp_network_xml.path }}"
+        state: absent
+      when: temp_network_xml.path is defined
+
+- name: Process network {{ network_name }} - absent
+  when: network_ensure == 'absent' and net_info.rc == 0
+  block:
+    - name: Stop network {{ network_name }}
+      ansible.builtin.command: "virsh net-destroy {{ network_name }}"
+      become: true
+      register: destroy_result
+      changed_when: destroy_result.rc == 0
+      failed_when: destroy_result.rc != 0 and 'not active' not in destroy_result.stderr
+
+    - name: Undefine network {{ network_name }}
+      ansible.builtin.command: "virsh net-undefine {{ network_name }}"
+      become: true
+      register: undefine_result
+      changed_when: undefine_result.rc == 0
+      failed_when: undefine_result.rc != 0

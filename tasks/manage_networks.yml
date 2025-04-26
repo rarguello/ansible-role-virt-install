@@ -1,0 +1,15 @@
+---
+# tasks file for managing libvirt networks
+
+- name: Check if libvirt daemon is running
+  ansible.builtin.service:
+    name: libvirtd
+    state: started
+  become: true
+
+- name: Process network configurations
+  ansible.builtin.include_tasks: manage_single_network.yml
+  loop: "{{ vm_networks }}"
+  loop_control:
+    loop_var: network_config
+  when: vm_networks is defined and vm_networks | length > 0

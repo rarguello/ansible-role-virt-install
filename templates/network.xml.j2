@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<network>
+  <name>{{ network_config.name }}</name>
+
+  {% if network_config.forward_mode | default('nat') != 'none' %}
+  <forward mode="{{ network_config.forward_mode | default('nat') }}"
+    {% if network_config.forward_dev is defined %}dev="{{ network_config.forward_dev }}"{% endif %} />
+  {% endif %}
+
+  {% if network_config.bridge is defined %}
+  <bridge name="{{ network_config.bridge }}" stp="on" delay="0" />
+  {% endif %}
+
+  {% if network_config.ip_address is defined and network_config.netmask is defined %}
+  <ip address="{{ network_config.ip_address }}" netmask="{{ network_config.netmask }}">
+    {% if network_config.dhcp_start is defined and network_config.dhcp_end is defined %}
+    <dhcp>
+      <range start="{{ network_config.dhcp_start }}" end="{{ network_config.dhcp_end }}" />
+
+      {% if network_config.static_hosts is defined %}
+      {% for host in network_config.static_hosts %}
+      <host mac="{{ host.mac }}" name="{{ host.name }}" ip="{{ host.ip }}" />
+      {% endfor %}
+      {% endif %}
+    </dhcp>
+    {% endif %}
+  </ip>
+  {% endif %}
+
+  {% if network_config.domain is defined %}
+  <domain name="{{ network_config.domain }}" localOnly="yes"/>
+  {% endif %}
+
+  {% if network_config.dns_forwarders is defined %}
+  <dns>
+    {% for forwarder in network_config.dns_forwarders %}
+    <forwarder addr="{{ forwarder }}"/>
+    {% endfor %}
+  </dns>
+  {% endif %}
+</network>

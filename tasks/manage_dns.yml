@@ -1,0 +1,96 @@
+---
+# tasks file for managing DNS entries in libvirt network
+
+- name: Ensure IP address is set for DNS registration
+  ansible.builtin.set_fact:
+    vm_network_ip_for_dns: "{{ vm_network_ip.split('/')[0] if vm_network_ip and '/' in vm_network_ip else vm_network_ip }}"
+  when: vm_network_config_method == 'static' and vm_network_ip | length > 0
+
+- name: Get VM IP address if using DHCP and VM is running
+  block:
+    - name: Get domain ID
+      ansible.builtin.shell: "virsh domid {{ vm_name }}"
+      register: domid
+      changed_when: false
+      failed_when: domid.rc != 0
+      become: true
+      when: current_vm_state is defined and current_vm_state == 'running'
+
+    - name: Get VM MAC address
+      ansible.builtin.shell: "virsh domiflist {{ vm_name }} | grep {{ vm_network }} | awk '{print $5}'"
+      register: mac_address
+      changed_when: false
+      failed_when: mac_address.rc != 0
+      become: true
+      when: current_vm_state is defined and current_vm_state == 'running'
+
+    - name: Get DHCP leases for VM
+      ansible.builtin.shell: "virsh net-dhcp-leases {{ vm_network }} | grep {{ mac_address.stdout | default('NO_MAC') }} | awk '{print $5}'"
+      register: dhcp_lease
+      changed_when: false
+      failed_when: false # Allow to fail if no lease found
+      become: true
+      when:
+        - current_vm_state is defined and current_vm_state == 'running'
+        - mac_address.stdout is defined and mac_address.stdout | length > 0
+
+    - name: Set VM IP from DHCP lease
+      ansible.builtin.set_fact:
+        vm_network_ip_for_dns: "{{ dhcp_lease.stdout.split('/')[0] if dhcp_lease.stdout and '/' in dhcp_lease.stdout else dhcp_lease.stdout }}"
+      when:
+        - dhcp_lease.stdout is defined
+        - dhcp_lease.stdout | length > 0
+  when:
+    - vm_network_config_method == 'dhcp'
+    - not (vm_network_ip_for_dns is defined and vm_network_ip_for_dns | length > 0)
+
+- name: Check if hostname already exists in libvirt DNS
+  ansible.builtin.shell: "virsh net-dumpxml {{ vm_network }} | grep -E '<host.*hostname=.{{ vm_dns_fqdn }}.'"
+  register: dns_entry_check
+  changed_when: false
+  failed_when: false # Don't fail if hostname not found
+  become: true
+
+# Actions only when we have an IP and DNS is enabled
+- name: Block to update DNS entries when conditions are met
+  when:
+    - vm_dns_enable | bool
+    - vm_network_ip_for_dns is defined
+    - vm_network_ip_for_dns | length > 0
+  block:
+    - name: Add hostname to libvirt DNS (if not exists)
+      ansible.builtin.shell: |
+        virsh net-update {{ vm_network }} add dns-host \
+        "<host ip='{{ vm_network_ip_for_dns }}' hostname='{{ vm_dns_fqdn }}'/>" \
+        --live --config
+      become: true
+      when: dns_entry_check.rc != 0 # No existing entry
+      register: dns_add_result
+      failed_when: dns_add_result.rc != 0 and "Failed to update network" not in dns_add_result.stderr
+      # Sometimes virsh returns error even when operation succeeded
+
+    - name: Update hostname in libvirt DNS (if IP changed)
+      ansible.builtin.shell: |
+        virsh net-update {{ vm_network }} modify dns-host \
+        "<host ip='{{ vm_network_ip_for_dns }}' hostname='{{ vm_dns_fqdn }}'/>" \
+        --live --config
+      become: true
+      when:
+        - dns_entry_check.rc == 0 # Entry exists
+        - vm_network_ip_for_dns not in dns_entry_check.stdout # IP doesn't match
+      register: dns_update_result
+      failed_when: dns_update_result.rc != 0 and "Failed to update network" not in dns_update_result.stderr
+
+# DNS entry removal when VM is destroyed/undefined
+- name: Remove hostname from libvirt DNS
+  ansible.builtin.shell: |
+    virsh net-update {{ vm_network }} delete dns-host \
+    "<host hostname='{{ vm_dns_fqdn }}'/>" \
+    --live --config
+  become: true
+  when:
+    - vm_dns_enable | bool
+    - vm_state in ['destroyed', 'undefined']
+    - dns_entry_check.rc == 0 # Entry exists
+  register: dns_delete_result
+  failed_when: dns_delete_result.rc != 0 and "Failed to update network" not in dns_delete_result.stderr

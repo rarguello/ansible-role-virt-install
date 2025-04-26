@@ -6,6 +6,41 @@ rhel_subscription_org: "" # Required for RHEL registration if not already regist
 rhel_subscription_activation_key: "" # Required for RHEL registration if not already registered
 rhel_subscription_pool_id: "" # Optional: Pool ID to attach if activation key doesn't handle it
 
+# Libvirt Network Management
+vm_manage_networks: true  # Whether to manage libvirt networks
+vm_networks:
+  # Example default network (already exists in most libvirt installations)
+  - name: default
+    ensure: present  # present, absent
+    autostart: true
+    forward_mode: nat
+    bridge: virbr0
+    ip_address: 192.168.122.1
+    netmask: 255.255.255.0
+    dhcp_start: 192.168.122.100
+    dhcp_end: 192.168.122.254
+    domain: virt.local
+    create_if_not_exists: false  # Skip creation if already exists
+
+  # Example additional networks (uncomment to use):
+  # - name: isolated
+  #   ensure: present
+  #   autostart: true
+  #   forward_mode: none  # isolated network
+  #   bridge: virbr1
+  #   ip_address: 10.10.10.1
+  #   netmask: 255.255.255.0
+  #   dhcp_start: 10.10.10.100
+  #   dhcp_end: 10.10.10.254
+  #   domain: isolated.local
+  #
+  # - name: bridged
+  #   ensure: present
+  #   autostart: true
+  #   forward_mode: bridge
+  #   forward_dev: eno1  # Replace with your physical interface
+  #   bridge: virbr2
+
 # Default VM creation method ('qcow2' or 'kickstart')
 vm_creation_method: "qcow2"
 
@@ -16,6 +51,12 @@ vm_vcpus: 2
 vm_os_variant: "rhel9-unknown" # Use 'osinfo-query os' on the KVM host to list options
 vm_network: "default" # Libvirt network name
 vm_autostart: true # Autostart VM with libvirtd
+
+# DNS Configuration for libvirt network
+vm_dns_enable: true # Whether to register VM hostname in libvirt DNS
+vm_dns_domain: "virt.local" # Domain suffix for VM hostnames
+vm_dns_hostname: "{{ vm_name }}" # Hostname to register (defaults to vm_name)
+vm_dns_fqdn: "{{ vm_dns_hostname }}.{{ vm_dns_domain }}" # Full hostname with domain
 
 # VM State Management
 vm_state: "running" # Desired state: running | shutdown | destroyed | undefined (same as destroyed)

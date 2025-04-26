@@ -77,6 +77,14 @@
         - vm_state == 'running'
         - current_vm_state != 'running'
       become: true
+      register: vm_started
+
+    # If VM was just started or is already running, manage DNS entries
+    - name: Manage DNS registration for running VM
+      ansible.builtin.include_tasks: manage_dns.yml
+      when:
+        - vm_state == 'running'
+        - (current_vm_state == 'running' or vm_started is defined)
 
     # Handle 'shutdown' state
     - name: Shutdown VM {{ vm_name }} if running
@@ -94,6 +102,11 @@
         - vm_state in ['destroyed', 'undefined']
         - current_vm_state == 'running'
       become: true
+
+    # Clean up DNS registrations before undefining the VM
+    - name: Manage DNS registration removal for destroyed VM
+      ansible.builtin.include_tasks: manage_dns.yml
+      when: vm_state in ['destroyed', 'undefined']
 
     - name: Undefine VM {{ vm_name }} (removes config)
       ansible.builtin.command: "virsh undefine {{ vm_name }}"

@@ -64,6 +64,14 @@
     - kvm_host_setup
     - rhel_subscription
 
+# Include network management tasks if enabled
+- name: Include network management tasks
+  ansible.builtin.include_tasks: manage_networks.yml
+  when: vm_manage_networks | default(true) | bool
+  tags:
+    - kvm_host_setup
+    - networks
+
 # Include VM creation tasks
 - name: Include VM creation tasks
   ansible.builtin.include_tasks: create_vm.yml
